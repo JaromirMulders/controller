@@ -41,7 +41,7 @@ void setup() {
 void loop() {
   
   for(int i = 0; i < N_POTS/2; i++){
-    int iter_1 = i<<1;
+    int iter_1 = i*2;
     int iter_2 = iter_1 + 1;
     
     rawPotVal[iter_1] = analogRead(potId[iter_1]);
@@ -50,7 +50,7 @@ void loop() {
     //first scale potvalues from 0-1024. to -1.-1.
     //then calculate angle for potmeter
     float val = atan2(rawPotVal[iter_1] /512.-1.,rawPotVal[iter_2] /512.-1.);
-    //subtract form oldval to get direction of potmeter
+    //subtract form oldval to get delta of potmeter
     float newVal  = constrain(val-oldVal[i],-0.5,0.5)*1000.;
     oldVal[i] = val;
 
@@ -59,7 +59,7 @@ void loop() {
     val = history[i] * (1. - filter_C) + newVal * filter_C;
     history[i] = newVal;
 
-    //add direction to currentvalue to get new value
+    //add delta to currentvalue to get new value
     potVal[i]+=newVal;
     potVal[i]= constrain(potVal[i],0.0,8192.0);
     sendVal[i] = (int)potVal[i];
@@ -69,16 +69,38 @@ void loop() {
  
   }//for
   //Serial.println();
-  
+
+  //send serial data to teensy
+  sendSerial(sendVal,sizeof(sendVal));
+
+  /*turn on leds
+  this for loops turns on the current led and turns off the led next to it
+  this way i don't have to loop trough all the leds to check which led
+  have to be on or off
+  */
   for(int i = 0; i < N_POTS/2; i++){
-    uint8_t lo = ledOrder[i+8];
-    uint8_t ledVal = ((ledOffest[i+8]+sendVal[i]/683)%12);
-    uint8_t ledId  = ledVal + lo*N_LEDPR;
-    showLedDial(ledId,20,10,10);
-    //strip.setPixelColor(i*N_LEDPR,100,10,10);
-  }
-  
+    
+    uint8_t lo = ledOrder[i+8]*N_LEDPR;
+    //divide potvals from 0-8192 to 0 - N_LEDPR 
+    uint8_t potDivide = sendVal[i]/683;
+    //Add offset for ledringId
+    uint8_t ledVal = ledOffest[i+8]+potDivide;
+    //calculate where next led needs to be
+    //the % is beceasue of the circular leds
+    uint8_t ledId  = (ledVal%N_LEDPR) + lo;
+    //calculate where next led the needs to be off needs to be
+    uint8_t ledOffId  = ((ledVal+1)%N_LEDPR) + lo;
+    
+    showLedDial(ledId,20*(potDivide+1),10,10);
+
+    //don't turn off leds when the potDivide is N_LEDPR so ledring can be fully lit
+    if(potDivide < N_LEDPR-1){
+      showLedDial(ledOffId,0,0,0);    
+    }//if
+    
+  }//for
   strip.show();  
+
 
 }//loop
 
@@ -87,13 +109,14 @@ void sendSerial(int * sendArray,int sizeOfArray){
   //send id of controllerboard
   Serial2.write(200);
 
+  //15 = 11110000
   byte bitMask = 15;
   
   for(int i = 0; i < sizeOfArray; i++){
     Serial2.write(sendArray[i]       &bitMask);
     Serial2.write(sendArray[i] >> 4  &bitMask);
     Serial2.write(sendArray[i] >> 8  &bitMask);
-    Serial2.write(sendArray[i] >> 12 &bitMask);    
+    Serial2.write(sendArray[i] >> 12 &bitMask);
   }//for
   
 }//sendSerial

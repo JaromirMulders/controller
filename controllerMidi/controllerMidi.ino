@@ -30,13 +30,14 @@ void setup() {
   digitalWrite(13,HIGH);
   
   Serial.begin(9600);
+  Serial3.begin(9600);
 }
 
 void loop() {
 
   
   for(int i = 0; i < N_POTS/2; i++){
-    int iter_1 = i<<1;
+    int iter_1 = i*2;
     int iter_2 = iter_1 + 1;
     
     rawPotVal[iter_1] = analogRead(potId[iter_1]);
@@ -74,14 +75,22 @@ void loop() {
     }//if
     oldSendVal[i] = sendVal[i];
 
-    
     //Serial.print(sendVal[i]);
     //Serial.print(" ");
 
   }//for
   //Serial.println();
 
+  getSerial();
 
-  
-  
 }
+
+void getSerial(){
+  //if there is Serial data availible 
+  if (Serial3.available() > 0) {
+    byte incomingbyte = Serial3.read();
+    Serial.println(incomingbyte);
+
+  }//if
+
+}//getSerial
