@@ -60,26 +60,33 @@ void loop() {
   for(int i = 0; i < N_POTS/2; i++){
     int iter_1 = i*2;
     int iter_2 = iter_1 + 1;
-    
-    rawPotVal[iter_1] = analogRead(potId[iter_1]);
-    rawPotVal[iter_2] = analogRead(potId[iter_2]);    
+
+    int preFilter = 16;
+    rawPotVal[iter_1] = 0;
+    rawPotVal[iter_2] = 0;
+    for(int j = 0; j < preFilter; j++){
+      rawPotVal[iter_1]+= analogRead(potId[iter_1]);
+      rawPotVal[iter_2]+= analogRead(potId[iter_2]);    
+    }
+    rawPotVal[iter_1]/=preFilter;
+    rawPotVal[iter_2]/=preFilter;
     
     float fRawVal1 = (float)rawPotVal[iter_1]/512.0 - 1.0;
     float fRawVal2 = (float)rawPotVal[iter_2]/512.0 - 1.0;
 
     //first scale potvalues from 0-256 to -1.-1.
     //then calculate angle for potmeter
-    float val = atan2(fRawVal1,fRawVal2);
+    float val = ApproxAtan2(fRawVal1,fRawVal2);
     //subtract form oldval to get delta of potmeter
-    float newVal  = constrain(val-oldVal[i],-0.5,0.5)*800.;
+    float newVal  = constrain(val-oldVal[i],-0.5,0.5)*1000.;
     oldVal[i] = val;
 
-    
+    /*
     //filter with onepole filter to remove noise
     float filter_C = 0.5;
     newVal = history[i] * (1. - filter_C) + newVal * filter_C;
     history[i] = newVal;
-    
+    */
     
     //add delta to currentvalue to get new value
     potVal[i]+=newVal;
@@ -119,8 +126,8 @@ void loop() {
     uint8_t ledOffId_1  = ((ledVal_1+1)%N_LEDPR) + lo_1;
     uint8_t ledOffId_2  = ((ledVal_2+1)%N_LEDPR) + lo_2;
     
-    showLedDial(ledId_1,20,10,10);
-    showLedDial(ledId_2,10,10,20);
+    showLedDial(ledId_1,30,10,10);
+    showLedDial(ledId_2,35,20,0);
 
     //don't turn off leds when the potDivide is N_LEDPR so ledring can be fully lit
     if(potDivide < N_LEDPR-1){
@@ -187,3 +194,45 @@ void byteToBits(byte b, bool * bArray){
   }//for
 
 }//byteToBits
+
+//fast atan2 from https://www.dsprelated.com/showarticle/1052.php
+float ApproxAtan2(float y, float x)
+{
+    const float n1 = 0.97239411f;
+    const float n2 = -0.19194795f;    
+    float result = 0.0f;
+    if (x != 0.0f)
+    {
+        const union { float flVal; uint32_t nVal; } tYSign = { y };
+        const union { float flVal; uint32_t nVal; } tXSign = { x };
+        if (fabsf(x) >= fabsf(y))
+        {
+            union { float flVal; uint32_t nVal; } tOffset = { PI };
+            // Add or subtract PI based on y's sign.
+            tOffset.nVal |= tYSign.nVal & 0x80000000u;
+            // No offset if x is positive, so multiply by 0 or based on x's sign.
+            tOffset.nVal *= tXSign.nVal >> 31;
+            result = tOffset.flVal;
+            const float z = y / x;
+            result += (n1 + n2 * z * z) * z;
+        }
+        else // Use atan(y/x) = pi/2 - atan(x/y) if |y/x| > 1.
+        {
+            union { float flVal; uint32_t nVal; } tOffset = { C_TWOPI };
+            // Add or subtract PI/2 based on y's sign.
+            tOffset.nVal |= tYSign.nVal & 0x80000000u;            
+            result = tOffset.flVal;
+            const float z = x / y;
+            result -= (n1 + n2 * z * z) * z;            
+        }
+    }
+    else if (y > 0.0f)
+    {
+        result = C_PI;
+    }
+    else if (y < 0.0f)
+    {
+        result = -C_PI;
+    }
+    return result;
+}

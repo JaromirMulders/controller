@@ -6,13 +6,14 @@
 #define C_CCDOWNSTART 10
 #define C_MIDICHANNEL 1
 #define N_BYTES 4
+#define M_PI
 
 uint8_t potId[N_POTS] = {A0,A1,A2,A3,A4,A5,A6,A7,A8,A9,A10,A11,A12,A13,A14,A15};
 
 int     rawPotVal[N_POTS]; 
 float   potVal[N_POTS/2]; 
-float   oldVal[N_POTS/2];
-float   history[N_POTS];
+double   oldVal[N_POTS/2];
+double   history[N_POTS];
 int     sendVal[N_POTS/2];
 int     oldSendVal[N_POTS/2];
 int     oldSerVal[N_POTS/2];
@@ -36,7 +37,7 @@ void setup() {
   digitalWrite(13,HIGH);
 
   analogReference(EXTERNAL);
-  
+
   Serial1.begin(9600);
   //Serial2.begin(9600);
 
@@ -46,7 +47,7 @@ void loop() {
 
   //check if arduino mega is sending data else check own data
   if (Serial1.available() > 0) {
-  //get potmeter data from arduino mega
+    //get potmeter data from arduino mega
     getSerial(); 
   }else{
     checkPots();
@@ -83,21 +84,28 @@ void checkPots(){
     int iter_1 = i*2;
     int iter_2 = iter_1 + 1;
 
-    rawPotVal[iter_1] = analogRead(potId[iter_1]);
-    rawPotVal[iter_2] = analogRead(potId[iter_2]);    
+    int preFilter = 64;
+    rawPotVal[iter_1] = 0;
+    rawPotVal[iter_2] = 0;
+    for(int j = 0; j < preFilter; j++){
+      rawPotVal[iter_1]+= analogRead(potId[iter_1]);
+      rawPotVal[iter_2]+= analogRead(potId[iter_2]);    
+    }
+    rawPotVal[iter_1]/=preFilter;
+    rawPotVal[iter_2]/=preFilter;
 
     //let value go from -1. 1.
-    float fRawVal1 = (float)rawPotVal[iter_1]/512.0 - 1.0;
-    float fRawVal2 = (float)rawPotVal[iter_2]/512.0 - 1.0;
+    double fRawVal1 = (float)rawPotVal[iter_1]/512.0 - 1.0;
+    double fRawVal2 = (float)rawPotVal[iter_2]/512.0 - 1.0;
 
     //calculate angle for potmeter
-    float val = atan2(fRawVal1,fRawVal2);
+    double val = atan2(fRawVal1,fRawVal2);
     //subtract form oldval to get direction of potmeter
-    float newVal  = constrain(val-oldVal[i],-0.5,0.5)*1000.;
+    double newVal  = constrain(val-oldVal[i],-0.5,0.5)*1000.;
     oldVal[i] = val;
-    
+
     //filter with onepole filter to remove noise
-    float filter_C = 0.025;
+    double filter_C = 0.1;
     newVal = history[i] * (1. - filter_C) + newVal * filter_C;
     history[i] = newVal;
     
@@ -106,6 +114,8 @@ void checkPots(){
     potVal[i]+=newVal;
     potVal[i]= constrain(potVal[i],0.0,8192.0);
     sendVal[i] = (int)potVal[i];
+
+
 
     //if value has changed
     if(sendVal[i] != oldSendVal[i]){
@@ -119,25 +129,21 @@ void checkPots(){
       usbMIDI.sendControlChange(C_CCUPSTART+i*4+1, sendVal2, C_MIDICHANNEL);
       usbMIDI.sendControlChange(C_CCUPSTART+i*4+2, sendVal3, C_MIDICHANNEL);
       usbMIDI.sendControlChange(C_CCUPSTART+i*4+3, sendVal4, C_MIDICHANNEL);  
-
+      
       byte serSendVal = sendVal[i]/683;
         if(serSendVal != oldSerVal[i]){
         //send value to arduino mega for setting the leds first value is the id of the pot
         //second value is the led value of the pot
         Serial1.write(200+i);
         Serial1.write(serSendVal);
-        Serial.print(200+i);
-        Serial.print(" ");
-        Serial.print(serSendVal);
-        Serial.print(" ");
-   Serial.println();
-       
-                
+      
       }
       oldSerVal[i] = serSendVal;
 
     }//if
     oldSendVal[i] = sendVal[i];
-    
+
   }//for
+
+  
 }//checkpots
