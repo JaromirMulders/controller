@@ -11,15 +11,18 @@
 
 uint8_t potId[N_POTS] = {A6,A7,A4,A5,A2,A3,A0,A1,A8,A9,A10,A11,A12,A13,A14,A15};
 int rawPotVal[N_POTS]; 
-float potVal[N_POTS/2]; 
-float oldVal[N_POTS/2];
+int oldRawPotVal[N_POTS];
+int potVal[N_POTS/2]; 
+double oldVal[N_POTS/2];
 float history[N_POTS/2];
 int   sendVal[N_POTS/2];
 int   oldSendVal[N_POTS/2];
 int   ledOrder[N_POTS] =   {6 ,4 ,2 ,0, 7,5,3,1 ,8,10,12,14,9,11,13,15};
 int   ledOffest[N_POTS] =  {11,11,11,11,5,5,5,11,0,0 ,11,0 ,5,5 ,4, 5};
+uint8_t ledColor[N_POTS][3];
 byte  extLedVal[N_POTS/2];
- 
+int oldLedVal[N_POTS];
+
 Adafruit_NeoPixel strip = Adafruit_NeoPixel(N_LEDS, PIN, NEO_GRB + NEO_KHZ800);
  
 void setup() {
@@ -32,10 +35,16 @@ void setup() {
     sendVal[i/2] = 0;
     oldSendVal[i/2] = 0;
     extLedVal[i/2] = 0;
+    ledColor[i/2][0] = 10;
+    ledColor[i/2][1] = 0;
+    ledColor[i/2][2] = 0;
+    ledColor[i/2+8][0] = 0;
+    ledColor[i/2+8][1] = 0;
+    ledColor[i/2+8][2] = 10;    
+    
   }//for
 
-  //Serial.begin(9600);
-  Serial2.begin(9600);
+  Serial2.begin(38400);
   strip.begin();
   
 }//setup
@@ -45,57 +54,85 @@ void loop() {
   
   if (Serial2.available() > 0) {  
     static byte pot_id = 0;
+    static byte led_id = 0;
     static byte bCount = 0;
+    static byte serialType = 0; 
   
     byte incomingbyte = Serial2.read();
 
-    if(incomingbyte >= 200){
+    if(incomingbyte >= 200 && incomingbyte < 208){
       pot_id = incomingbyte-200;
-    }else if (incomingbyte > -1){
-      extLedVal[pot_id] = incomingbyte;
-    }//if
-    
-  }//if
+      serialType = 1;
+    }else if(incomingbyte >= 208 && incomingbyte < 216){
+      pot_id = incomingbyte-208;
+      serialType = 2;   
+    }else if(incomingbyte >= 150 && incomingbyte < 198){
+      led_id = incomingbyte-150;
+      serialType = 3;                    
+    }else if (incomingbyte > -1 && incomingbyte < 128){
+      if(serialType == 1){
+        extLedVal[pot_id] = incomingbyte;
+
+      }else if(serialType == 2){
+         potVal[pot_id] = incomingbyte*64;
+      }else if(serialType == 3){
+         ledColor[led_id/3][led_id%3] = incomingbyte*2; 
+      }
+      
+    }else if(incomingbyte == 255){
+      serialType = 0;
+      clearLeds();
+      recalculateLeds();
+    }
+     
+  }else{
+  
   
   for(int i = 0; i < N_POTS/2; i++){
     int iter_1 = i*2;
     int iter_2 = iter_1 + 1;
 
-    int preFilter = 16;
+    int preFilter = 8;
     rawPotVal[iter_1] = 0;
     rawPotVal[iter_2] = 0;
+    
     for(int j = 0; j < preFilter; j++){
       rawPotVal[iter_1]+= analogRead(potId[iter_1]);
       rawPotVal[iter_2]+= analogRead(potId[iter_2]);    
     }
     rawPotVal[iter_1]/=preFilter;
     rawPotVal[iter_2]/=preFilter;
+
+    if(oldRawPotVal[iter_1] != rawPotVal[iter_1] || oldRawPotVal[iter_2] != rawPotVal[iter_2]){
     
-    float fRawVal1 = (float)rawPotVal[iter_1]/512.0 - 1.0;
-    float fRawVal2 = (float)rawPotVal[iter_2]/512.0 - 1.0;
+      double fRawVal1 = (double)rawPotVal[iter_1]/512.0 - 1.0;
+      double fRawVal2 = (double)rawPotVal[iter_2]/512.0 - 1.0;
+  
+      //first scale potvalues from 0-256 to -1.-1.
+      //then calculate angle for potmeter
+      double val = atan2(fRawVal1,fRawVal2);
+      //subtract form oldval to get delta of potmeter
+      double newVal  = constrain(val-oldVal[i],-0.5,0.5)*1000.;
+      oldVal[i] = val;
+  
+      
+      //filter with onepole filter to remove noise
+      double filter_C = 0.5;
+      newVal = history[i] * (1. - filter_C) + newVal * filter_C;
+      history[i] = newVal;
+      
+      
+      //add delta to currentvalue to get new value
+      potVal[i]+=(int)newVal;
+      potVal[i]= constrain(potVal[i],0,8192);
+      sendVal[i] = (int)potVal[i];
+    }//if
+    oldRawPotVal[iter_1] = rawPotVal[iter_1];
+    oldRawPotVal[iter_2] = rawPotVal[iter_2];    
 
-    //first scale potvalues from 0-256 to -1.-1.
-    //then calculate angle for potmeter
-    float val = ApproxAtan2(fRawVal1,fRawVal2);
-    //subtract form oldval to get delta of potmeter
-    float newVal  = constrain(val-oldVal[i],-0.5,0.5)*1000.;
-    oldVal[i] = val;
-
-    /*
-    //filter with onepole filter to remove noise
-    float filter_C = 0.5;
-    newVal = history[i] * (1. - filter_C) + newVal * filter_C;
-    history[i] = newVal;
-    */
-    
-    //add delta to currentvalue to get new value
-    potVal[i]+=newVal;
-    potVal[i]= constrain(potVal[i],0.0,8192.0);
-    sendVal[i] = (int)potVal[i];
-
- 
   }//for
-
+  
+  
   //send serial data to teensy
   sendSerial(sendVal,oldSendVal,sizeof(sendVal)/sizeof(sendVal[0]));
   
@@ -105,9 +142,9 @@ void loop() {
   this way i don't have to loop trough all the leds to check which led
   has to be on or off
    */
-
+  
   for(int i = 0; i < N_POTS/2; i++){
-    
+
     uint8_t lo_1 = ledOrder[i+8]*N_LEDPR;
     uint8_t lo_2 = ledOrder[i]*N_LEDPR;
     
@@ -116,32 +153,35 @@ void loop() {
     //Add offset for ledringId
     uint8_t ledVal_1 = ledOffest[i+8]+potDivide;
     uint8_t ledVal_2 = ledOffest[i]+extLedVal[i];
-    
-    //calculate where next led needs to be
-    //the % is beceasue of the circular leds
-    uint8_t ledId_1  = (ledVal_1%N_LEDPR) + lo_1;
-    uint8_t ledId_2  = (ledVal_2%N_LEDPR) + lo_2;
-    
-    //calculate where next led the needs to be off needs to be
-    uint8_t ledOffId_1  = ((ledVal_1+1)%N_LEDPR) + lo_1;
-    uint8_t ledOffId_2  = ((ledVal_2+1)%N_LEDPR) + lo_2;
-    
-    showLedDial(ledId_1,30,10,10);
-    showLedDial(ledId_2,35,20,0);
 
-    //don't turn off leds when the potDivide is N_LEDPR so ledring can be fully lit
-    if(potDivide < N_LEDPR-1){
-      showLedDial(ledOffId_1,0,0,0);   
-    }//if
-    if(extLedVal[i] < N_LEDPR-1){
-      showLedDial(ledOffId_2,0,0,0);   
-    }//if
-    
+    int iter = i*2;
+    //if(oldLedVal[iter] != potDivide || oldLedVal[iter+1] != extLedVal[i]){ 
+      //calculate where next led needs to be
+      //the % is beceasue of the circular leds
+      uint8_t ledId_1  = (ledVal_1%N_LEDPR) + lo_1;
+      uint8_t ledId_2  = (ledVal_2%N_LEDPR) + lo_2;
+      
+      //calculate where next led the needs to be off needs to be
+      uint8_t ledOffId_1  = ((ledVal_1+1)%N_LEDPR) + lo_1;
+      uint8_t ledOffId_2  = ((ledVal_2+1)%N_LEDPR) + lo_2;
+      
+      showLedDial(ledId_1,ledColor[i+8][0],ledColor[i+8][1],ledColor[i+8][2]);
+      showLedDial(ledId_2,ledColor[i][0],ledColor[i][1],ledColor[i][2]);
+  
+      //don't turn off leds when the potDivide is N_LEDPR so ledring can be fully lit
+      if(potDivide < N_LEDPR-1){
+        showLedDial(ledOffId_1,0,0,0);   
+      }//if
+      if(extLedVal[i] < N_LEDPR-1){
+        showLedDial(ledOffId_2,0,0,0);   
+      }//if
+    //}//if
+    //oldLedVal[iter]   = potDivide;
+    //oldLedVal[iter+1] = extLedVal[i];
   }//for
   
   strip.show();  
-  
- 
+  }
 }//loop
 
 void sendSerial(int * sendArray,int * oldSendArray ,int sizeOfArray){
@@ -156,10 +196,8 @@ void sendSerial(int * sendArray,int * oldSendArray ,int sizeOfArray){
       //send id of potmeter in last 4 byts
       Serial2.write(200+i);
       //send data of potmeter in first 4 bytes
-      Serial2.write(sendArray[i]       &bitMask);
-      Serial2.write(sendArray[i] >> 4  &bitMask);
-      Serial2.write(sendArray[i] >> 8  &bitMask);
-      Serial2.write(sendArray[i] >> 12 &bitMask);
+      Serial2.write(sendArray[i] & 127);
+      Serial2.write(sendArray[i] >> 7);
            
     }//if
     
@@ -172,67 +210,45 @@ void sendSerial(int * sendArray,int * oldSendArray ,int sizeOfArray){
 void showLedDial(uint8_t id, uint8_t r, uint8_t g, uint8_t b){
   strip.setPixelColor(id,r,g,b);
 }//showLedDial
- 
 
-//function for converting an array of bits to a byte
-byte bitsToByte(bool * bitArray){
+void clearLeds(){
+  
+  for(int i = 0; i < N_LEDS; i++){
+     strip.setPixelColor(i,0,0,0);   
 
-  byte b = 0;
-  for(int i = 0; i < 8; i++){
-    b = (b << 1) | (bitArray[i] & 1);
   }//for
+  
+}//clearLeds
 
-  return b;
 
-}//bitsToByte
+void recalculateLeds(){
 
-//function for converting bytes to bits
-void byteToBits(byte b, bool * bArray){
+  for(int i = 0; i < N_POTS/2; i++){
+    
+    uint8_t lo_1 = ledOrder[i+8]*N_LEDPR;
+    uint8_t lo_2 = ledOrder[i]*N_LEDPR;
+    
+    //divide potvals from 0-8192 to 0 - N_LEDPR 
+    uint8_t potDivide = sendVal[i]/683;
 
-  for(int i = 0; i < 8; i++){
-    bArray[i] = ((128 >> i) & b) >> (7-i);
+    for(int j = 0; j < potDivide; j++){
+      uint8_t ledVal_1 = ledOffest[i+8]+j;
+      uint8_t ledId_1  = ((ledVal_1)%N_LEDPR) + lo_1; 
+      uint8_t ledOffId_1  = ((ledVal_1)%N_LEDPR) + lo_1;
+
+      showLedDial(ledOffId_1,ledColor[i+8][0],ledColor[i+8][1],ledColor[i+8][2]);
+     
+    }//for
+    for(int j = 0; j < extLedVal[i]; j++){
+      uint8_t ledVal_2 = ledOffest[i]+j;
+      uint8_t ledId_2  = (ledVal_2%N_LEDPR) + lo_2;
+      uint8_t ledOffId_2  = ((ledVal_2)%N_LEDPR) + lo_2;
+
+      showLedDial(ledOffId_2,ledColor[i][0],ledColor[i][1],ledColor[i][2]);
+      
+    }//for    
+    
   }//for
+  strip.show();  
 
-}//byteToBits
-
-//fast atan2 from https://www.dsprelated.com/showarticle/1052.php
-float ApproxAtan2(float y, float x)
-{
-    const float n1 = 0.97239411f;
-    const float n2 = -0.19194795f;    
-    float result = 0.0f;
-    if (x != 0.0f)
-    {
-        const union { float flVal; uint32_t nVal; } tYSign = { y };
-        const union { float flVal; uint32_t nVal; } tXSign = { x };
-        if (fabsf(x) >= fabsf(y))
-        {
-            union { float flVal; uint32_t nVal; } tOffset = { PI };
-            // Add or subtract PI based on y's sign.
-            tOffset.nVal |= tYSign.nVal & 0x80000000u;
-            // No offset if x is positive, so multiply by 0 or based on x's sign.
-            tOffset.nVal *= tXSign.nVal >> 31;
-            result = tOffset.flVal;
-            const float z = y / x;
-            result += (n1 + n2 * z * z) * z;
-        }
-        else // Use atan(y/x) = pi/2 - atan(x/y) if |y/x| > 1.
-        {
-            union { float flVal; uint32_t nVal; } tOffset = { C_TWOPI };
-            // Add or subtract PI/2 based on y's sign.
-            tOffset.nVal |= tYSign.nVal & 0x80000000u;            
-            result = tOffset.flVal;
-            const float z = x / y;
-            result -= (n1 + n2 * z * z) * z;            
-        }
-    }
-    else if (y > 0.0f)
-    {
-        result = C_PI;
-    }
-    else if (y < 0.0f)
-    {
-        result = -C_PI;
-    }
-    return result;
 }
